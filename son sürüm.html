@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Aralık Sayacı PRO</title>
+    <!-- Tailwind CSS CDN - Modern ve Duyarlı Tasarım için -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Inter fontunu ekle - Tailwind'in varsayılanı zaten sans-serif ama bu daha modern */
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700;800&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+            -webkit-font-smoothing: antialiased; /* Fontları daha pürüzsüz gösterir */
+            -moz-osx-font-smoothing: grayscale;
+        }
+
+        /* Özel animasyonlar */
+        @keyframes fade-in-up {
+            from {
+                opacity: 0;
+                transform: translateY(20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .animate-fade-in-up {
+            animation: fade-in-up 0.5s ease-out forwards;
+        }
+
+        /* Progress Bar stili - Tarayıcılar arası farklılık gösterebilir */
+        progress {
+            -webkit-appearance: none;
+            -moz-appearance: none;
+            appearance: none;
+            border: none;
+            height: 16px; /* Daha ince çubuk */
+            border-radius: 8px; /* Yuvarlak köşeler */
+            background-color: #e5e7eb; /* Tailwind gray-200 */
+            overflow: hidden; /* İç dolgunun taşmasını engelle */
+        }
+
+        progress::-webkit-progress-bar {
+            background-color: #e5e7eb;
+            border-radius: 8px;
+        }
+
+        progress::-webkit-progress-value {
+            background-color: #3b82f6; /* Tailwind blue-500 */
+            border-radius: 8px;
+            transition: width 0.1s linear; /* Daha yumuşak geçiş */
+        }
+
+        progress.rest-mode::-webkit-progress-value {
+            background-color: #ef4444; /* Tailwind red-500 */
+        }
+
+        progress::-moz-progress-bar {
+            background-color: #3b82f6; /* Tailwind blue-500 */
+            border-radius: 8px;
+            transition: width 0.1s linear;
+        }
+        progress.rest-mode::-moz-progress-bar {
+            background-color: #ef4444; /* Tailwind red-500 */
+        }
+    </style>
+</head>
+<body class="bg-gradient-to-br from-blue-100 to-purple-200 min-h-screen flex items-center justify-center p-4">
+    <div class="bg-white p-8 md:p-12 rounded-3xl shadow-xl border-t-4 border-blue-500 text-center max-w-lg w-full animate-fade-in-up flex flex-col gap-6">
+        <!-- Sayım ve durum bilgisini gösteren büyük etiket -->
+        <h1 id="counter" class="text-6xl md:text-7xl font-extrabold text-blue-700 transition-colors duration-300 ease-in-out">Hazır</h1>
+
+        <!-- Set bilgisini gösteren etiket -->
+        <p id="set-info" class="text-2xl md:text-3xl text-gray-600">Set: 0 / 15</p>
+
+        <!-- İlerleme Çubuğu -->
+        <div class="w-full mt-4">
+            <progress id="progressBar" value="0" max="100"></progress>
+            <p id="progressText" class="text-sm text-gray-500 mt-2">0 / 5 saniye</p>
+        </div>
+
+        <!-- Butonlar -->
+        <div class="flex flex-col sm:flex-row justify-center gap-4 mt-6">
+            <button id="startButton" class="bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-8 rounded-full text-xl md:text-2xl transition-all duration-300 ease-in-out shadow-lg hover:shadow-xl transform hover:-translate-y-1 focus:outline-none focus:ring-4 focus:ring-green-300 active:bg-green-800">
+                Başla
+            </button>
+            <button id="resetButton" class="bg-gray-500 hover:bg-gray-600 text-white font-semibold py-3 px-8 rounded-full text-lg md:text-xl transition-all duration-300 ease-in-out shadow-md hover:shadow-lg focus:outline-none focus:ring-4 focus:ring-gray-300 active:bg-gray-700" disabled>
+                Sıfırla
+            </button>
+        </div>
+
+        <!-- Durum Mesajı -->
+        <p id="statusLabel" class="text-gray-500 italic text-sm mt-4">Bekliyor...</p>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            // HTML elemanlarına referanslar
+            const counterLabel = document.getElementById('counter');
+            const setInfoLabel = document.getElementById('set-info');
+            const progressBar = document.getElementById('progressBar');
+            const progressText = document.getElementById('progressText');
+            const startButton = document.getElementById('startButton');
+            const resetButton = document.getElementById('resetButton');
+            const statusLabel = document.getElementById('statusLabel');
+
+            // Sayaç durumu değişkenleri
+            let currentCount = 0;
+            let currentSet = 1;
+            let isRunning = false; // Sayacın çalışıp çalışmadığını kontrol eder
+
+            // Sabitler
+            const TOTAL_SETS = 15;      // Toplam set sayısı
+            const COUNT_DURATION = 5;   // Her setin sayım süresi (saniye)
+            const REST_DURATION = 2;    // Setler arası mola süresi (saniye)
+
+            // Zamanlayıcı id'leri
+            let countdownInterval;
+            let restInterval;
+
+            // Ses motoru (Web Audio API)
+            const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+
+            /**
+             * Belirtilen türe göre farklı bir bip sesi çalar.
+             * Web Audio API kullanılarak programatik olarak ses üretilir.
+             * @param {string} type - Sesin türü ('countdown', 'rest', 'completion', 'transition').
+             */
+            function playSound(type) {
+                if (!audioContext) {
+                    console.error("AudioContext mevcut değil, ses çalınamıyor.");
+                    return;
+                }
+                const oscillator = audioContext.createOscillator();
+                const gainNode = audioContext.createGain();
+
+                oscillator.connect(gainNode);
+                gainNode.connect(audioContext.destination);
+
+                oscillator.type = 'sine'; // Sinüs dalgası (daha yumuşak bir bip için)
+
+                let frequency;
+                let duration = 0.1; // Varsayılan ses süresi (saniye)
+
+                switch (type) {
+                    case "countdown":
+                        frequency = 660; // Yüksek bip
+                        break;
+                    case "rest":
+                        frequency = 330; // Alçak bip
+                        break;
+                    case "completion": // Set/antrenman tamamlama sesi
+                        frequency = 880; // Çok yüksek
+                        duration = 0.2;
+                        break;
+                    case "transition": // Mola bitişi, sayım başlangıcı geçiş sesi
+                        frequency = 550; // Orta-yüksek
+                        duration = 0.15;
+                        break;
+                    default:
+                        frequency = 440; // Varsayılan
+                        break;
+                }
+
+                oscillator.frequency.setValueAtTime(frequency, audioContext.currentTime);
+
+                gainNode.gain.setValueAtTime(1, audioContext.currentTime);
+                // Kısa bir fade out
+                gainNode.gain.exponentialRampToValueAtTime(0.001, audioContext.currentTime + duration);
+
+                oscillator.start(audioContext.currentTime);
+                oscillator.stop(audioContext.currentTime + duration);
+            }
+
+            /**
+             * Ana ekran bileşenlerini günceller.
+             * @param {string} counterText - Sayaç etiketi için metin.
+             * @param {string} setInfoText - Set bilgisi etiketi için metin.
+             * @param {number} progressValue - İlerleme çubuğu mevcut değeri.
+             * @param {number} progressMax - İlerleme çubuğu maksimum değeri.
+             * @param {string} progressDisplay - İlerleme çubuğu altındaki metin.
+             * @param {boolean} isRestMode - Mola modunda olup olmadığını belirler (ilerleme çubuğu rengi için).
+             */
+            function updateDisplay(counterText, setInfoText, progressValue, progressMax, progressDisplay, isRestMode = false) {
+                counterLabel.textContent = counterText;
+                setInfoLabel.textContent = setInfoText;
+
+                progressBar.value = progressValue;
+                progressBar.max = progressMax;
+                progressText.textContent = progressDisplay;
+
+                if (isRestMode) {
+                    counterLabel.classList.remove('text-blue-700');
+                    counterLabel.classList.add('text-red-600');
+                    progressBar.classList.add('rest-mode');
+                } else {
+                    counterLabel.classList.remove('text-red-600');
+                    counterLabel.classList.add('text-blue-700');
+                    progressBar.classList.remove('rest-mode');
+                }
+            }
+
+            /**
+             * Sayım sürecini başlatır (1-5 arası sayım).
+             */
+            function startCountdown() {
+                clearInterval(restInterval); // Mola zamanlayıcısını durdur
+                let actualElapsedSeconds = 0; // Geçen gerçek saniyeler (0'dan başlar)
+
+                statusLabel.textContent = "Sayım başladı!";
+
+                // İlk saniye (1) için anında güncelleme ve ses çalma
+                updateDisplay("1", `Set: ${currentSet} / ${TOTAL_SETS}`, actualElapsedSeconds, COUNT_DURATION, `1 / ${COUNT_DURATION} saniye`, false);
+                playSound('countdown');
+
+                countdownInterval = setInterval(() => {
+                    actualElapsedSeconds++; // Her saniye geçtiğinde artır
+
+                    if (actualElapsedSeconds < COUNT_DURATION) { // Eğer sayım süresi henüz dolmadıysa (0, 1, 2, 3, 4)
+                        const currentSecondDisplayed = actualElapsedSeconds + 1; // Ekranda gösterilecek değer (1'den 5'e)
+                        updateDisplay(currentSecondDisplayed.toString(), `Set: ${currentSet} / ${TOTAL_SETS}`, actualElapsedSeconds, COUNT_DURATION, `${currentSecondDisplayed} / ${COUNT_DURATION} saniye`, false);
+                        playSound('countdown');
+                    } else { // Sayım süresi doldu (actualElapsedSeconds 5 olduğunda)
+                        clearInterval(countdownInterval); // Sayım sayacını durdur
+                        playSound('completion'); // Set tamamlama sesi
+                        counterLabel.textContent = `${currentSet}. set`; // Sayacı "X. set" olarak güncelle
+                        statusLabel.textContent = "Set tamamlandı!";
+                        progressBar.value = COUNT_DURATION; // İlerleme çubuğunu doldur
+
+                        if (currentSet < TOTAL_SETS) {
+                            startRest(); // Mola sürecini başlat
+                        } else {
+                            // Tüm setler tamamlandıysa
+                            counterLabel.textContent = "Antrenman Tamamlandı!";
+                            statusLabel.textContent = "Tebrikler!";
+                            startButton.textContent = "Yeniden Başla";
+                            startButton.classList.remove('bg-green-600', 'hover:bg-green-700');
+                            startButton.classList.add('bg-blue-600', 'hover:bg-blue-700');
+                            startButton.disabled = false;
+                            startButton.classList.remove('opacity-50', 'cursor-not-allowed');
+                            resetButton.disabled = false;
+                            isRunning = false;
+                        }
+                    }
+                }, 1000); // Her 1 saniyede bir çalış
+            }
+
+            /**
+             * Mola sürecini başlatır (2 saniye mola).
+             */
+            function startRest() {
+                let restCountdown = REST_DURATION; // Mola için geri sayım
+                let restStartTime = audioContext.currentTime; // Molanın başladığı zaman
+                clearInterval(countdownInterval); // Sayım zamanlayıcısını durdur
+
+                statusLabel.textContent = "Mola!";
+                updateDisplay(`Mola: ${restCountdown}`, setInfoLabel.textContent, 0, REST_DURATION, `${restCountdown} / ${REST_DURATION} saniye kaldı`, true);
+                playSound('rest'); // Mola başlangıcında ses çal
+
+                restInterval = setInterval(() => {
+                    const elapsed = Math.floor(audioContext.currentTime - restStartTime);
+                    const remainingRest = REST_DURATION - elapsed;
+
+                    if (remainingRest > 0) {
+                        updateDisplay(`Mola: ${remainingRest}`, setInfoLabel.textContent, elapsed, REST_DURATION, `${remainingRest} / ${REST_DURATION} saniye kaldı`, true);
+                        playSound('rest'); // Her saniyede mola sesi çal
+                    } else {
+                        clearInterval(restInterval); // Mola sayacını durdur
+                        playSound('transition'); // Geçiş sesi
+                        currentSet++;
+                        setInfoLabel.textContent = `Set: ${currentSet} / ${TOTAL_SETS}`;
+                        statusLabel.textContent = "Sayıma başlanıyor...";
+                        startCountdown(); // Yeni set için sayımı başlat
+                    }
+                }, 1000); // Her 1 saniyede bir çalış
+            }
+
+            /**
+             * Tüm zamanlayıcıları durdurur ve uygulamayı başlangıç durumuna getirir.
+             */
+            function resetTimer() {
+                clearInterval(countdownInterval);
+                clearInterval(restInterval);
+                currentCount = 0;
+                currentSet = 1; // Set sayacı her zaman 1'den başlar
+                isRunning = false;
+
+                // Başlangıçta set bilgisini "Set: 1 / 15" olarak gösterir
+                updateDisplay("Hazır", `Set: ${currentSet} / ${TOTAL_SETS}`, 0, COUNT_DURATION, "0 / 5 saniye", false);
+                statusLabel.textContent = "Sıfırlandı.";
+
+                startButton.textContent = "Başla";
+                startButton.classList.remove('bg-blue-600', 'hover:bg-blue-700');
+                startButton.classList.add('bg-green-600', 'hover:bg-green-700');
+                startButton.disabled = false;
+                startButton.classList.remove('opacity-50', 'cursor-not-allowed');
+                resetButton.disabled = true; // Reset butonunu devre dışı bırak
+            }
+
+            // Başla butonuna tıklama olayı dinleyicisi
+            startButton.addEventListener('click', () => {
+                if (!isRunning) {
+                    startButton.disabled = true; // Butonu devre dışı bırak
+                    startButton.classList.add('opacity-50', 'cursor-not-allowed'); // Soluklaştır
+                    resetButton.disabled = false; // Reset butonunu etkinleştir
+                    isRunning = true;
+                    statusLabel.textContent = "Başlatılıyor...";
+                    
+                    // Butona basıldığında currentSet'i 1'e ayarlayıp set bilgisini gösterir
+                    currentSet = 1;
+                    setInfoLabel.textContent = `Set: ${currentSet} / ${TOTAL_SETS}`;
+                    
+                    startCountdown(); // Sayacı başlat
+                } else {
+                    // Yeniden Başla durumu
+                    resetTimer();
+                    startButton.click(); // Reset sonrası tekrar başlat
+                }
+            });
+
+            // Sıfırla butonuna tıklama olayı dinleyicisi
+            resetButton.addEventListener('click', () => {
+                resetTimer();
+            });
+
+            // Başlangıç durumunu ayarla
+            resetTimer(); // Uygulama yüklendiğinde reset durumunda olsun
+        });
+    </script>
+</body>
+</html>
